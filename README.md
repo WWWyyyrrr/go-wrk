@@ -1,3 +1,6 @@
+# fork from github.com/tsliwowicz/go-wrk
+
+
 go-wrk - an HTTP benchmarking tool
 ==================================
 

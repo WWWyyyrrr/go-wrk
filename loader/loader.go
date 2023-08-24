@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -38,6 +38,8 @@ type LoadCfg struct {
 	clientKey          string
 	caCert             string
 	http2              bool
+	clientIps          []net.IP
+	serverIps          []net.IP
 }
 
 // RequesterStats used for colelcting aggregate statistics
@@ -66,9 +68,12 @@ func NewLoadCfg(duration int, // seconds
 	clientCert string,
 	clientKey string,
 	caCert string,
-	http2 bool) (rt *LoadCfg) {
+	http2 bool,
+	cips []net.IP,
+	sips []net.IP) (rt *LoadCfg) {
 	rt = &LoadCfg{duration, goroutines, testUrl, reqBody, method, host, header, statsAggregator, timeoutms,
-		allowRedirects, disableCompression, disableKeepAlive, skipVerify, 0, clientCert, clientKey, caCert, http2}
+		allowRedirects, disableCompression, disableKeepAlive, skipVerify, 0, clientCert, clientKey, caCert, http2,
+		cips, sips}
 	return
 }
 
@@ -103,9 +108,13 @@ func escapeUrlStr(in string) string {
 
 // DoRequest single request implementation. Returns the size of the response and its duration
 // On error - returns -1 on both
-func DoRequest(httpClient *http.Client, header map[string]string, method, host, loadUrl, reqBody string) (respSize int, duration time.Duration) {
+func DoRequest(httpClient *http.Client, header map[string]string, method, host, loadUrl, reqBody string, sip net.IP) (respSize int, duration time.Duration) {
 	respSize = -1
 	duration = -1
+
+	if len(sip) != 0 {
+		loadUrl = strings.ReplaceAll(loadUrl, "ServerIP", sip.String())
+	}
 
 	loadUrl = escapeUrlStr(loadUrl)
 
@@ -150,7 +159,7 @@ func DoRequest(httpClient *http.Client, header map[string]string, method, host, 
 			resp.Body.Close()
 		}
 	}()
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		fmt.Println("An error occured reading body", err)
 	}
@@ -169,18 +178,18 @@ func DoRequest(httpClient *http.Client, header map[string]string, method, host, 
 
 // Requester a go function for repeatedly making requests and aggregating statistics as long as required
 // When it is done, it sends the results using the statsAggregator channel
-func (cfg *LoadCfg) RunSingleLoadSession() {
+func (cfg *LoadCfg) RunSingleLoadSession(cliIP, serverIP net.IP) {
 	stats := &RequesterStats{MinRequestTime: time.Minute}
 	start := time.Now()
 
 	httpClient, err := client(cfg.disableCompression, cfg.disableKeepAlive, cfg.skipVerify,
-		cfg.timeoutms, cfg.allowRedirects, cfg.clientCert, cfg.clientKey, cfg.caCert, cfg.http2)
+		cfg.timeoutms, cfg.allowRedirects, cfg.clientCert, cfg.clientKey, cfg.caCert, cfg.http2, cliIP)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	for time.Since(start).Seconds() <= float64(cfg.duration) && atomic.LoadInt32(&cfg.interrupted) == 0 {
-		respSize, reqDur := DoRequest(httpClient, cfg.header, cfg.method, cfg.host, cfg.testUrl, cfg.reqBody)
+		respSize, reqDur := DoRequest(httpClient, cfg.header, cfg.method, cfg.host, cfg.testUrl, cfg.reqBody, serverIP)
 		if respSize > 0 {
 			stats.TotRespSize += int64(respSize)
 			stats.TotDuration += reqDur

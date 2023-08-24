@@ -2,6 +2,7 @@ package util
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -11,17 +12,16 @@ type HeaderList []string
 
 func (i *HeaderList) String() string {
 	out := []string{}
-    for _, s := range *i {
-        out = append(out, s)
-    }
-    return strings.Join(out, ", ")
+	for _, s := range *i {
+		out = append(out, s)
+	}
+	return strings.Join(out, ", ")
 }
 
 func (i *HeaderList) Set(value string) error {
-    *i = append(*i, value)
-    return nil
+	*i = append(*i, value)
+	return nil
 }
-
 
 // RedirectError specific error type that happens on redirection
 type RedirectError struct {
@@ -87,7 +87,7 @@ func MinDuration(d1 time.Duration, d2 time.Duration) time.Duration {
 	}
 }
 
-//EstimateHttpHeadersSize had to create this because headers size was not counted
+// EstimateHttpHeadersSize had to create this because headers size was not counted
 func EstimateHttpHeadersSize(headers http.Header) (result int64) {
 	result = 0
 
@@ -101,4 +101,32 @@ func EstimateHttpHeadersSize(headers http.Header) (result int64) {
 	result += int64(len("\r\n"))
 
 	return result
+}
+
+func CheckIPAvailable(ip net.IP) (bool, error) {
+	// 获取所有网络接口
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return false, err
+	}
+	// 遍历每个网络接口
+	for _, iface := range interfaces {
+		// 获取接口的所有IP地址
+		addrs, err := iface.Addrs()
+		if err != nil {
+			return false, err
+		}
+		// 遍历每个IP地址并与给定的IP地址进行比较
+		for _, addr := range addrs {
+			var ipNet *net.IPNet
+			var ok bool
+			if ipNet, ok = addr.(*net.IPNet); !ok {
+				continue
+			}
+			if ip.Equal(ipNet.IP) {
+				return true, nil // 找到匹配的IP地址
+			}
+		}
+	}
+	return false, nil
 }

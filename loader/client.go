@@ -4,24 +4,37 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"io/ioutil"
+	"net"
 	"net/http"
 
 	"fmt"
 
-	"golang.org/x/net/http2"
 	"time"
+
 	"github.com/tsliwowicz/go-wrk/util"
+	"golang.org/x/net/http2"
 )
 
-func client(disableCompression, disableKeepAlive, skipVerify bool, timeoutms int, allowRedirects bool, clientCert, clientKey, caCert string, usehttp2 bool) (*http.Client, error) {
-
+func client(disableCompression, disableKeepAlive, skipVerify bool, timeoutms int, allowRedirects bool, clientCert, clientKey, caCert string, usehttp2 bool, cip net.IP) (*http.Client, error) {
 	client := &http.Client{}
 	//overriding the default parameters
-	client.Transport = &http.Transport{
-		DisableCompression:    disableCompression,
-		DisableKeepAlives:     disableKeepAlive,
-		ResponseHeaderTimeout: time.Millisecond * time.Duration(timeoutms),
-		TLSClientConfig:       &tls.Config{InsecureSkipVerify: skipVerify},
+	if len(cip) != 0 {
+		client.Transport = &http.Transport{
+			DialContext: (&net.Dialer{
+				LocalAddr: &net.TCPAddr{IP: cip},
+			}).DialContext,
+			DisableCompression:    disableCompression,
+			DisableKeepAlives:     disableKeepAlive,
+			ResponseHeaderTimeout: time.Millisecond * time.Duration(timeoutms),
+			TLSClientConfig:       &tls.Config{InsecureSkipVerify: skipVerify},
+		}
+	} else {
+		client.Transport = &http.Transport{
+			DisableCompression:    disableCompression,
+			DisableKeepAlives:     disableKeepAlive,
+			ResponseHeaderTimeout: time.Millisecond * time.Duration(timeoutms),
+			TLSClientConfig:       &tls.Config{InsecureSkipVerify: skipVerify},
+		}
 	}
 
 	if !allowRedirects {

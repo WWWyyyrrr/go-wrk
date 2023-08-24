@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"net"
 	"os"
 	"os/signal"
 	"runtime"
@@ -14,9 +15,9 @@ import (
 	"github.com/tsliwowicz/go-wrk/util"
 )
 
-const APP_VERSION = "0.9"
+const APP_VERSION = "0.1"
 
-//default that can be overridden from the command line
+// default that can be overridden from the command line
 var versionFlag bool = false
 var helpFlag bool = false
 var duration int = 10 //seconds
@@ -38,6 +39,8 @@ var clientCert string
 var clientKey string
 var caCert string
 var http2 bool
+var clientIps string
+var serverIps string
 
 func init() {
 	flag.BoolVar(&versionFlag, "v", false, "Print version details")
@@ -58,9 +61,11 @@ func init() {
 	flag.StringVar(&clientKey, "key", "", "Private key file name (SSL/TLS")
 	flag.StringVar(&caCert, "ca", "", "CA file to verify peer against (SSL/TLS)")
 	flag.BoolVar(&http2, "http", true, "Use HTTP/2")
+	flag.StringVar(&clientIps, "mcp", "", "Set multi http client ip(example:192.168.1.1,192.168.1.2)")
+	flag.StringVar(&serverIps, "msp", "", "Set multi http server ip(example:192.168.1.1,192.168.1.2)")
 }
 
-//printDefaults a nicer format for the defaults
+// printDefaults a nicer format for the defaults
 func printDefaults() {
 	fmt.Println("Usage: go-wrk <options> <url>")
 	fmt.Println("Options:")
@@ -123,12 +128,50 @@ func main() {
 		}
 		reqBody = string(data)
 	}
-
+	cips := make([]net.IP, 0, 0)
+	if clientIps != "" {
+		split := strings.Split(clientIps, ",")
+		for _, s := range split {
+			ip := net.ParseIP(s)
+			available, err := util.CheckIPAvailable(ip)
+			if err != nil {
+				fmt.Println(fmt.Errorf("check client ip err %s: %w", s, err))
+				os.Exit(1)
+			}
+			if !available {
+				fmt.Println(fmt.Errorf("can not find client ip in any inteface"))
+				os.Exit(1)
+			}
+			cips = append(cips, ip)
+		}
+	}
+	sips := make([]net.IP, 0, 0)
+	if serverIps != "" {
+		if !strings.Contains(testUrl, "ServerIP") {
+			fmt.Println(fmt.Errorf("if send request to multi server IPs, the target url must use <ServerIP> instead of real server IP"))
+			os.Exit(1)
+		}
+		split := strings.Split(serverIps, ",")
+		for _, s := range split {
+			sips = append(sips, net.ParseIP(s))
+		}
+	}
+	if timeoutms == 1000 {
+		timeoutms = 1000 * duration
+	}
 	loadGen := loader.NewLoadCfg(duration, goroutines, testUrl, reqBody, method, host, header, statsAggregator, timeoutms,
-		allowRedirectsFlag, disableCompression, disableKeepAlive, skipVerify, clientCert, clientKey, caCert, http2)
+		allowRedirectsFlag, disableCompression, disableKeepAlive, skipVerify, clientCert, clientKey, caCert, http2, cips, sips)
 
 	for i := 0; i < goroutines; i++ {
-		go loadGen.RunSingleLoadSession()
+		c := net.IP{}
+		if len(cips) != 0 {
+			c = cips[i%len(cips)]
+		}
+		s := net.IP{}
+		if len(sips) != 0 {
+			s = sips[i%len(sips)]
+		}
+		go loadGen.RunSingleLoadSession(c, s)
 	}
 
 	responders := 0
